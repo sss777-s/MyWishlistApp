@@ -1,14 +1,16 @@
 name: Build Debug APK
+
 on:
   push:
     branches: [ main ]
   workflow_dispatch:
 
+env:
+  ANDROID_SDK_ROOT: ${{ github.workspace }}/android-sdk
+
 jobs:
   build:
     runs-on: ubuntu-latest
-    env:
-      JAVA_HOME: /opt/hostedtoolcache/Java_Temurin-Hotspot_jdk/17.0.16-8/x64
 
     steps:
       - name: Checkout repository
@@ -18,28 +20,36 @@ jobs:
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: '17'
+          java-version: 17
 
-      - name: Install Gradle (8.4)
-        run: |
-          GRADLE_VERSION=8.4
-          wget https://services.gradle.org/distributions/gradle-${GRADLE_VERSION}-bin.zip -O gradle.zip
-          unzip -q gradle.zip -d /opt
-          echo "/opt/gradle-${GRADLE_VERSION}/bin" >> $GITHUB_PATH
+      - name: Install CLI tools (wget, unzip)
+        run: sudo apt-get update && sudo apt-get install -y wget unzip
 
-      - name: (Optional) show java & gradle versions
+      - name: Install Android commandline-tools and SDK packages
         run: |
-          java -version || true
-          gradle -v || true
+          mkdir -p $ANDROID_SDK_ROOT
+          cd $ANDROID_SDK_ROOT
+          wget https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip -O cmdline.zip
+          unzip -q cmdline.zip -d cmdline-tools
+          mkdir -p $ANDROID_SDK_ROOT/cmdline-tools/latest
+          mv cmdline-tools/* $ANDROID_SDK_ROOT/cmdline-tools/latest/
+          export PATH=$ANDROID_SDK_ROOT/cmdline-tools/latest/bin:$PATH
+          yes | $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager --sdk_root=${ANDROID_SDK_ROOT} "platform-tools" "platforms;android-33" "build-tools;33.0.2"
+        shell: bash
 
-      - name: Build debug APK (use gradlew if exists, otherwise system gradle)
+      - name: Ensure gradlew is executable
         run: |
-          if [ -f "./gradlew" ]; then
+          if [ -f ./gradlew ]; then
             chmod +x ./gradlew
-            ./gradlew assembleDebug --no-daemon
           else
-            gradle assembleDebug --no-daemon
+            echo "gradlew not found — ensure wrapper is in repository."
+            exit 1
           fi
+
+      - name: Build debug APK
+        run: ./gradlew assembleDebug --no-daemon
+        env:
+          ANDROID_SDK_ROOT: ${{ env.ANDROID_SDK_ROOT }}
 
       - name: Upload APK artifact (if exists)
         uses: actions/upload-artifact@v4
