@@ -1,0 +1,11 @@
+<resources>
+    <string name="app_name">قائمة الأمنيات</string>
+    <string name="label_target">الهدف الكلي</string>
+    <string name="label_current">المبلغ الحالي</string>
+    <string name="label_remaining">المتبقي للوصول</string>
+    <string name="btn_settings">الإعدادات</string>
+    <string name="added_msg">تمت إضافة %1$d</string>
+    <string name="tap_here">اضغط هنا</string>
+    <string name="tap_value">قيمة كل ضغطة:</string>
+    <string name="save">حفظ</string>
+</resources>
