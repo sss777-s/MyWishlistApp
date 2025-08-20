@@ -1,138 +1,104 @@
-name: Generate wrapper (optional) + Build Debug APK
+name: Generate Gradle Wrapper + Build Debug APK
 
 on:
+  workflow_dispatch: {}
   push:
-    branches: [ main ]
-  workflow_dispatch:
+    branches:
+      - main
+
+permissions:
+  contents: write   # نحتاج هذا لتمكين دفع (commit/push) الملفات المولدة إلى الفرع إن أمكن
 
 env:
   ANDROID_SDK_ROOT: ${{ github.workspace }}/android-sdk
-  GRADLE_WRAPPER_VERSION: 8.5.1
+  GRADLE_VERSION_TO_GENERATE: 8.5.1
 
 jobs:
-  generate-wrapper:
-    name: Generate Gradle wrapper if missing
+  gen-and-build:
     runs-on: ubuntu-latest
-    outputs:
-      wrapper_created: ${{ steps.check_wrapper.outputs.wrapper_created }}
     steps:
-      - name: Checkout repository
+      - name: Checkout (full)
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
       - name: Set up JDK 17
-        id: setup-java
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
 
-      - name: Check for existing gradlew
-        id: check_wrapper
+      - name: Configure git user (for possible commit)
         run: |
-          # check if wrapper binary and wrapper properties exist
-          if [ -x "./gradlew" ] && [ -f "./gradle/wrapper/gradle-wrapper.properties" ]; then
-            echo "wrapper_created=false" >> $GITHUB_OUTPUT
-            echo "Found existing gradlew and wrapper properties. Skipping generation."
-            exit 0
-          fi
-          echo "wrapper_created=true" >> $GITHUB_OUTPUT
-          echo "Will attempt to generate gradle wrapper."
+          git config --global user.name "github-actions[bot]" || true
+          git config --global user.email "actions@github.com" || true
 
-      - name: Install system gradle (if wrapper needed)
-        if: steps.check_wrapper.outputs.wrapper_created == 'true'
-        run: |
-          sudo apt-get update -y
-          sudo apt-get install -y gradle || true
-
-      - name: Generate wrapper (if needed)
-        if: steps.check_wrapper.outputs.wrapper_created == 'true'
-        run: |
-          # try to generate wrapper using system gradle
-          if command -v gradle >/dev/null 2>&1; then
-            gradle wrapper --gradle-version "${GRADLE_WRAPPER_VERSION}" --distribution-type all || gradle wrapper || true
-            chmod +x gradlew || true
-            git config user.name "github-actions[bot]" || true
-            git config user.email "actions@github.com" || true
-            git add gradlew gradlew.bat gradle/wrapper || true
-            git commit -m "chore(ci): add generated gradle wrapper" || true
-            git push origin HEAD:main || true
-          else
-            # as a last resort create a harmless placeholder so build step doesn't die instantly
-            printf '%s\n' '#!/usr/bin/env sh' 'echo "Gradle wrapper not available. Placeholder." ' > gradlew
-            chmod +x gradlew || true
-            echo "Generated placeholder gradlew (not a real wrapper)."
-          fi
-
-  build:
-    name: Build Debug APK
-    needs: generate-wrapper
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repository (fetch full)
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Ensure gradlew is executable (if present)
-        run: |
-          if [ -f "./gradlew" ]; then
-            chmod +x ./gradlew || true
-            echo "gradlew is present and made executable."
-          else
-            echo "gradlew not present."
-          fi
-
-      - name: Set up JDK 17
-        id: setup-java-2
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: '17'
-
-      - name: Install Android commandline-tools (robust)
-        id: sdk_install
+      - name: Generate Gradle wrapper if missing (using downloaded Gradle)
         run: |
           set -euo pipefail
-          SDK_ROOT="${ANDROID_SDK_ROOT}"
-          mkdir -p "${SDK_ROOT}"
-          cd "${SDK_ROOT}"
 
-          TEMP_ZIP="cmdline.zip"
-          # choose a stable commandline-tools zip (version id may be updated later)
-          if [ ! -f "${TEMP_ZIP}" ]; then
-            wget -q --show-progress https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip -O "${TEMP_ZIP}"
+          if [ -f "./gradlew" ] && [ -f "./gradle/wrapper/gradle-wrapper.properties" ] && [ -f "./gradle/wrapper/gradle-wrapper.jar" ]; then
+            echo "Gradle wrapper already present — skipping generation."
+          else
+            echo "==> Generating Gradle wrapper using local downloaded Gradle ${GRADLE_VERSION_TO_GENERATE}"
+            GRV="${GRADLE_VERSION_TO_GENERATE}"
+            D=/tmp/gradle-${GRV}
+            ZIP=/tmp/gradle-${GRV}.zip
+
+            if [ ! -f "${ZIP}" ]; then
+              curl -fsSL "https://services.gradle.org/distributions/gradle-${GRV}-bin.zip" -o "${ZIP}"
+            fi
+
+            rm -rf "${D}" || true
+            unzip -q -o "${ZIP}" -d /tmp
+            chmod +x /tmp/gradle-${GRV}/bin/gradle
+
+            # run gradle wrapper inside repo to generate gradlew, wrapper jar and properties
+            /tmp/gradle-${GRV}/bin/gradle wrapper --gradle-version "${GRV}" --distribution-type all || true
+
+            # make gradlew executable
+            if [ -f "./gradlew" ]; then
+              chmod +x ./gradlew || true
+            fi
+
+            # try to commit & push generated wrapper back to repo (best-effort)
+            git add gradlew gradlew.bat gradle/wrapper || true
+            git commit -m "ci: add generated Gradle wrapper (${GRV})" || echo "nothing to commit or commit failed"
+            git push origin HEAD:main || echo "push failed (may be branch-protected or token limited) - build will continue anyway"
+          fi
+
+      - name: Install Android commandline-tools (safe extract)
+        run: |
+          set -euo pipefail
+          mkdir -p "${ANDROID_SDK_ROOT}"
+          cd "${ANDROID_SDK_ROOT}"
+
+          ZIP=/tmp/cmdline.zip
+          if [ ! -f "${ZIP}" ]; then
+            wget -q --show-progress "https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip" -O "${ZIP}"
           fi
 
           TMPDIR="$(mktemp -d)"
-          unzip -q -o "${TEMP_ZIP}" -d "${TMPDIR}"
+          unzip -q -o "${ZIP}" -d "${TMPDIR}"
 
-          mkdir -p "${SDK_ROOT}/cmdline-tools"
+          mkdir -p "${ANDROID_SDK_ROOT}/cmdline-tools"
 
-          # Move children safely to avoid 'move into subdir of itself' errors
-          if [ -d "${TMPDIR}/cmdline-tools" ]; then
-            for ENTRY in "${TMPDIR}/cmdline-tools"/*; do
-              [ -e "$ENTRY" ] || continue
-              SRC_REAL="$(realpath "$ENTRY")"
-              DST="${SDK_ROOT}/cmdline-tools/$(basename "$ENTRY")"
-              DST_REAL="$(realpath -m "$DST")"
-              if [ "$SRC_REAL" = "$DST_REAL" ]; then
-                echo "Skipping move of $ENTRY -> $DST (same path)"
-                continue
-              fi
-              rm -rf "$DST" || true
-              mv "$ENTRY" "${SDK_ROOT}/cmdline-tools/" || true
-            done
+          # Find the folder that contains sdkmanager and copy its contents into cmdline-tools/latest
+          SDKMANAGER_DIR="$(find "${TMPDIR}" -type f -name sdkmanager -printf '%h' -quit || true)"
+          if [ -n "${SDKMANAGER_DIR}" ]; then
+            mkdir -p "${ANDROID_SDK_ROOT}/cmdline-tools/latest"
+            cp -a "${SDKMANAGER_DIR}/." "${ANDROID_SDK_ROOT}/cmdline-tools/latest/" || true
           else
-            echo "Unexpected zip layout; copying all content"
-            rsync -a "${TMPDIR}/" "${SDK_ROOT}/" || true
+            echo "Could not find sdkmanager in extracted zip - listing for debug:"
+            ls -la "${TMPDIR}" || true
+            # still try to copy everything
+            cp -a "${TMPDIR}/." "${ANDROID_SDK_ROOT}/" || true
           fi
 
           rm -rf "${TMPDIR}" || true
-          echo "SDK commandline-tools installed to ${SDK_ROOT}/cmdline-tools"
+          echo "cmdline-tools installed under ${ANDROID_SDK_ROOT}/cmdline-tools"
 
-      - name: Accept licenses & install SDK packages
+      - name: Accept licenses & install required SDK packages
         env:
           ANDROID_SDK_ROOT: ${{ env.ANDROID_SDK_ROOT }}
         run: |
@@ -141,39 +107,35 @@ jobs:
           mkdir -p "${ANDROID_SDK_ROOT}/licenses"
 
           if command -v sdkmanager >/dev/null 2>&1; then
-            yes | sdkmanager --sdk_root="${ANDROID_SDK_ROOT}" "platform-tools" "platforms;android-34" "build-tools;34.0.0" || true
+            yes | sdkmanager --sdk_root="${ANDROID_SDK_ROOT}" "platform-tools" "platforms;android-33" "build-tools;33.0.2" || true
             yes | sdkmanager --sdk_root="${ANDROID_SDK_ROOT}" --licenses || true
           else
-            echo "sdkmanager not found at expected location; listing cmdline-tools directories for debugging:"
+            echo "sdkmanager not available: listing ${ANDROID_SDK_ROOT}/cmdline-tools for debugging"
             ls -la "${ANDROID_SDK_ROOT}/cmdline-tools" || true
+            exit 1
           fi
 
-      - name: Build debug APK with Gradle
+      - name: Build debug APK (use wrapper if present)
         env:
           ANDROID_SDK_ROOT: ${{ env.ANDROID_SDK_ROOT }}
-          JAVA_HOME: ${{ steps.setup-java-2.outputs.path || '' }}
         run: |
           set -euo pipefail
-          echo "Top-level files:"
-          ls -la || true
-
-          if [ -f "./gradlew" ] && [ -x "./gradlew" ]; then
-            ./gradlew assembleDebug --no-daemon || true
+          if [ -x "./gradlew" ]; then
+            echo "Running ./gradlew assembleDebug"
+            ./gradlew assembleDebug --no-daemon
           else
-            echo "No executable gradlew; attempting system gradle"
+            echo "No gradlew executable found. Attempting system gradle (may fail)."
+            sudo apt-get update -y
+            sudo apt-get install -y gradle || true
             if command -v gradle >/dev/null 2>&1; then
               gradle assembleDebug --no-daemon || true
             else
-              echo "No gradle available; build will not produce APK."
+              echo "No gradle available — cannot build."
+              exit 1
             fi
           fi
 
-          echo "Finding APKs (for debugging):"
-          find . -type f -name "*.apk" -print || true
-          echo "Listing app/build/outputs:"
-          ls -R app/build/outputs || true
-
-      - name: Upload APK artifact (if exists)
+      - name: Upload APK artifact (if any)
         uses: actions/upload-artifact@v4
         with:
           name: app-debug-apks
