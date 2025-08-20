@@ -1,0 +1,35 @@
+name: Add gradle-wrapper.jar to repo (one-time)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  add-wrapper-jar:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Make wrapper folder
+        run: |
+          mkdir -p gradle/wrapper
+
+      - name: Download gradle-wrapper.jar (from a public sample repo)
+        run: |
+          # NOTE: source: public sample repo with ready gradle-wrapper.jar
+          URL="https://raw.githubusercontent.com/nkoder/sample-gradle-wrapper/main/gradle/wrapper/gradle-wrapper.jar"
+          echo "Downloading gradle-wrapper.jar from $URL"
+          curl -fsSL "$URL" -o gradle/wrapper/gradle-wrapper.jar
+          ls -la gradle/wrapper || true
+
+      - name: Commit jar if added
+        run: |
+          git config user.name "github-actions[bot]" || true
+          git config user.email "actions@github.com" || true
+          git add gradle/wrapper/gradle-wrapper.jar || true
+          git commit -m "chore(ci): add gradle-wrapper.jar" || echo "No changes to commit"
+          git push origin HEAD:main || echo "Push failed (maybe token restrictions)."
