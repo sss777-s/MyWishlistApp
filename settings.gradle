@@ -1,2 +1,20 @@
+pluginManagement {
+    repositories {
+        // الترتيب مهم: gradlePluginPortal، google، mavenCentral
+        gradlePluginPortal()
+        google()
+        mavenCentral()
+    }
+}
+
+dependencyResolutionManagement {
+    // يمنع المشاريع الفرعية من تعريف مستودعات مختلفة ما لم تكن ضرورية
+    repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+    repositories {
+        google()
+        mavenCentral()
+    }
+}
+
 rootProject.name = "MyTapSaver"
 include(":app")
