@@ -1,8 +1,10 @@
 @echo off
-REM Gradle wrapper batch file
-SETLOCAL
-if not defined JAVA_HOME (
-  echo JAVA_HOME not set. Please install Java 17+ and set JAVA_HOME.
-) 
-java -cp "%~dp0\gradle\wrapper\gradle-wrapper.jar" org.gradle.wrapper.GradleWrapperMain %*
-ENDLOCAL
+setlocal
+set DIRNAME=%~dp0
+if defined JAVA_HOME (
+  set "JAVACMD=%JAVA_HOME%\bin\java"
+) else (
+  set "JAVACMD=java"
+)
+set "CLASSPATH=%DIRNAME%gradle\wrapper\gradle-wrapper.jar"
+"%JAVACMD%" -cp "%CLASSPATH%" org.gradle.wrapper.GradleWrapperMain %*
